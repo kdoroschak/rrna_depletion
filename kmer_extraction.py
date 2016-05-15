@@ -185,7 +185,8 @@ def kmer_analysis_per_base_thread(args):
 
 
 def kmer_analysis_per_base(bam_path="/homes/gws/sdorkenw/rrna/data/alignments/SRR891244.Aligned.sortedByCoord.out.bam",
-                  fa_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/GRCh38.p3_genomic.fa",
+                  # fa_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/GRCh38.p3_genomic.fa",
+                  fa_path="/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa",
                   save_path="/homes/gws/sdorkenw/rrna/data/kmer_analysis/",
                   quality_threshold=0, contiguous=False, k=14, n_workers=10):
     pfile = pysam.AlignmentFile(bam_path, "rb")
@@ -194,14 +195,14 @@ def kmer_analysis_per_base(bam_path="/homes/gws/sdorkenw/rrna/data/alignments/SR
 
     for ir in range(len(pfile.references)):
         ref = pfile.references[ir]
-        if ref.startswith("CM"):
+        if ref.startswith("chr"):
             references.append(ref)
             ref_lengths[ref] = pfile.lengths[ir]
 
     print "create reference sequences"
     reference_seqs = {}
     for rec in SeqIO.parse(open(fa_path), 'fasta'):
-        if rec.id.startswith("CM"):
+        if rec.id.startswith("chr"):
             reference_seqs[rec.id] = rec.seq
 
     multi_params = []
@@ -230,10 +231,6 @@ def kmer_analysis_per_base(bam_path="/homes/gws/sdorkenw/rrna/data/alignments/SR
     else:
         np.save(save_path + "coverage_ribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-2]), coverage_ribo)
         np.save(save_path + "coverage_nonribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-2]), coverage_nonribo)
-
-    # pu.plot_all(k, y_max=int(np.max(np.max(coverage_nonribo), np.max(coverage_ribo))),
-    #             contiguous=contiguous)
-
 
 def kmer_analysis_per_read_thread(args):
     reads = args[0]
@@ -320,8 +317,3 @@ def kmer_analysis_per_read(bam_path="/homes/gws/sdorkenw/rrna/data/alignments/SR
     else:
         np.save(save_path + "read_ribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-1]), kmers_ribo)
         np.save(save_path + "read_nonribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-1]), kmers_nonribo)
-
-
-def get_ribo_ratio(bam_path="/homes/gws/sdorkenw/rrna/data/rsubread_aligned/SRR891242_1_s.bam"):
-    pfile = pysam.AlignmentFile(bam_path, "rb")
-    print pfile.mapped / float(pfile.unmapped)
