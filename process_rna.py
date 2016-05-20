@@ -11,8 +11,11 @@ import time
 
 # reference_genome_path = "/homes/gws/sdorkenw/rrna/data/ref_genomes/GRCh38.p3_genomic.fa"
 # reference_genome_path = "/homes/gws/sdorkenw/reference_genome_38/genome_GRCh38.fa"
-reference_genome_path = "/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa"
-reference_genome_gt_path = "/homes/gws/sdorkenw/reference_genome_38/genes_GRCh38.gtf"
+# reference_genome_path = "/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa"
+# reference_genome_path = "/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa"
+reference_genome_path = "/homes/gws/sdorkenw/rrna/data/ref_genomes/m10_genome.fa"
+# reference_genome_gt_path = "/homes/gws/sdorkenw/reference_genome_38/genes_GRCh38.gtf"
+reference_genome_gt_path = "/homes/gws/sdorkenw/reference_genome_38/data/ref_genomes/m10_genes.gtf"
 # reference_genome_gt_path = "/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf"
 reference_genome_exon_gt_path = "/homes/gws/sdorkenw/reference_genome_38/genes_exons.gtf"
 
@@ -262,11 +265,11 @@ def main(input_dir, accession_file=None, count_only=False,
         download_from_accession_file(input_dir, accession_file,
                                      n_processes=n_processes)
 
-    # sra_files = glob.glob(input_dir + "/*.sra")
+    sra_files = glob.glob(input_dir + "/*.sra")
 
     # Convert sra files to fastq.gz files
-    # convert_sra_to_fastq(sra_files, n_processes=n_processes)
-    # fastq_files = glob.glob(input_dir + "/*.fastq.gz")
+    convert_sra_to_fastq(sra_files, n_processes=n_processes)
+    fastq_files = glob.glob(input_dir + "/*.fastq.gz")
 
     if count_only:
         bam_files = glob.glob(input_dir + "/*/*out.bam")

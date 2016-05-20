@@ -56,26 +56,33 @@ def extract_kmers_from_sequence(seq, k=6, reverse_complement=False, n_worker=1,
     return kmers
 
 
-def extract_kmers_in_ribosome_region(k=6,
-                                     ribo_path="/homes/gws/sdorkenw/rrna/data/rrna_hg38.gtf",
-                                     reference_fasta_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/GRCh38.p3_genomic.fa",
+def extract_kmers_in_ribosome_region(k=14,
+                                     # ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf",
+                                     # reference_fasta_path="/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa",
+                                     ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/mm10_rmsk.gtf",
+                                     reference_fasta_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/m10_genome.fa",
                                      # reference_chr_path="/homes/gws/sdorkenw/rrna/data/chr_fasta/*.fna",
-                                     save_folder="/homes/gws/sdorkenw/rrna/data/",
+                                     save_folder="/homes/gws/sdorkenw/rrna/data/kmer_analysis/",
                                      reload=True, reverse_complement=True,
                                      n_worker=1):
-    if os.path.exists(save_folder + "ribo_features.pkl") and reload:
-        f = open(save_folder + "ribo_features.pkl", "r")
+    if "m10" in ribo_path:
+        suffix = "m10_%d" % k
+    else:
+        suffix = "hg38_%d" % k
+
+    if os.path.exists(save_folder + "ribo_features_%s.pkl" % suffix) and reload:
+        f = open(save_folder + "ribo_features_%s.pkl" % suffix, "r")
         ribo_features = pkl.load(f)
         f.close()
     else:
         ribo_db = gffutils.create_db(ribo_path, dbfn=":memory:")
         ribo_features = list(ribo_db.all_features())
-        f = open(save_folder + "ribo_features.pkl", "w")
+        f = open(save_folder + "ribo_features_%s.pkl" % suffix, "w")
         pkl.dump(ribo_features, f, protocol=pkl.HIGHEST_PROTOCOL)
         f.close()
 
-    if os.path.exists(save_folder + "fasta_seqs.pkl") and reload:
-        f = open(save_folder + "fasta_seqs.pkl", "r")
+    if os.path.exists(save_folder + "fasta_seqs_%s.pkl" % suffix) and reload:
+        f = open(save_folder + "fasta_seqs_%s.pkl" % suffix, "r")
         fasta_seqs = pkl.load(f)
         f.close()
     else:
@@ -91,7 +98,7 @@ def extract_kmers_in_ribosome_region(k=6,
         for anno in fasta_parse:
             fasta_seqs[anno.name] = anno.seq
 
-        f = open(save_folder + "fasta_seqs.pkl", "w")
+        f = open(save_folder + "fasta_seqs_%s.pkl" % suffix, "w")
         pkl.dump(fasta_seqs, f, protocol=pkl.HIGHEST_PROTOCOL)
         f.close()
 
@@ -113,7 +120,8 @@ def extract_kmers_in_ribosome_region(k=6,
     for feat in ribo_features:
         # if feat.chrom in fasta_seqs:
         if feat.chrom in cm_mapper:
-            chrom = cm_mapper[feat.chrom]
+            # chrom = cm_mapper[feat.chrom]
+            chrom = feat.chrom
             seq = fasta_seqs[chrom][feat.start: feat.end].tostring()
             if feat.featuretype == "exon":
                 # print feat.chrom, "sequence length:", len(seq)
@@ -152,7 +160,7 @@ def kmer_analysis_per_base_thread(args):
     time_start = time.time()
     for column in pileupcolumns:
         while pos <= column.pos:
-            if cnt_k < k or pos % 1000 == 0 or contiguous:
+            if cnt_k < k or pos % 400 == 0 or contiguous:
                 if column.n > quality_threshold and pos == column.pos:
                     coverage[pos % k] = column.n
                 else:
@@ -166,9 +174,9 @@ def kmer_analysis_per_base_thread(args):
                     kmer = reference_seqs[pos - k: pos]
                     if not "N" in kmer:
                         if kmer in ribo_kmers:
-                            coverage_ribo.append(this_coverage)
+                            coverage_ribo.append(np.array([ref, pos, this_coverage]))
                         else:
-                            coverage_nonribo.append(this_coverage)
+                            coverage_nonribo.append(np.array([ref, pos, this_coverage]))
 
                 cnt_k = k
 
@@ -181,7 +189,7 @@ def kmer_analysis_per_base_thread(args):
     print "%s: finished" % ref
     reference_seqs = None
     pileupcolumns = None
-    return coverage_ribo, coverage_nonribo
+    return np.array(coverage_ribo), np.array(coverage_nonribo)
 
 
 def kmer_analysis_per_base(bam_path="/homes/gws/sdorkenw/rrna/data/alignments/SRR891244.Aligned.sortedByCoord.out.bam",
@@ -317,3 +325,67 @@ def kmer_analysis_per_read(bam_path="/homes/gws/sdorkenw/rrna/data/alignments/SR
     else:
         np.save(save_path + "read_ribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-1]), kmers_ribo)
         np.save(save_path + "read_nonribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-1]), kmers_nonribo)
+
+
+def clean_whole_kmer_analysis(re_path, k):
+    paths = glob.glob(re_path)
+    for path in paths:
+        if not "cleaned" in path:
+            clean_kmer_analysis(path, k, path[:-4] + "cleaned.npy")
+
+
+def clean_kmer_analysis(path, k, save_path,
+                        ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf"):
+    ribo_db = gffutils.create_db(ribo_path, dbfn=":memory:")
+    ribo_features = list(ribo_db.all_features())
+
+    chroms = set([feat.chrom for feat in ribo_features])
+    ribo_dict = dict(zip(chroms, [set() for _ in range(len(chroms))]))
+    for feat in ribo_features:
+        if feat.featuretype == "exon":
+            for pos in range(feat.start, feat.end+1):
+                ribo_dict[feat.chrom].add(pos)
+
+    cleaned_expressions = []
+    kmer_expressions = np.load(path)
+
+    cnt_del = 0
+    for ichrom in range(len(kmer_expressions)):
+        for iexp in range(len(kmer_expressions[ichrom])):
+            chrom = kmer_expressions[ichrom][iexp][0]
+            pos = int(kmer_expressions[ichrom][iexp][1])
+            if not pos in ribo_dict[chrom] and not pos+k in ribo_dict[chrom]:
+                cleaned_expressions.append(float(kmer_expressions[ichrom][iexp][2]))
+            else:
+                cnt_del += 1
+                # print float(kmer_expressions[iexp][2])
+
+    print "removed %d kmers" % cnt_del
+    np.save(save_path, cleaned_expressions)
+
+
+def get_content_in_ribo_region(ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf",
+                               reference_fasta_path="/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa",
+                               n_worker=1):
+
+    ribo_db = gffutils.create_db(ribo_path, dbfn=":memory:")
+    ribo_features = list(ribo_db.all_features())
+
+    fasta_seqs = {}
+    fasta_parse = SeqIO.parse(open(reference_fasta_path), 'fasta')
+    for anno in fasta_parse:
+        fasta_seqs[anno.name] = anno.seq
+
+    content = np.zeros(4)
+    for feat in ribo_features:
+        # if feat.chrom in fasta_seqs:
+        if not "_" in feat.chrom:
+            chrom = feat.chrom
+            seq = fasta_seqs[chrom][feat.start: feat.end].tostring()
+            if feat.featuretype == "exon":
+                content[0] += seq.count("A")
+                content[1] += seq.count("C")
+                content[2] += seq.count("G")
+                content[3] += seq.count("T")
+
+    print content
