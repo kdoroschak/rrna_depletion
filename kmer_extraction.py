@@ -26,8 +26,6 @@ class NoDaemonPool(multiprocessing.pool.Pool):
     Process = NoDaemonProcess
 
 
-
-
 def extract_kmers_from_sequence_thread(args):
     seq = args[0]
     k =  args[1]
@@ -432,3 +430,5 @@ def get_content_in_ribo_region(ribo_path="/homes/gws/sdorkenw/rrna/data/ref_geno
                 content[3] += seq.count("T")
 
     print content
+
+

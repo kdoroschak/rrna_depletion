@@ -17,7 +17,7 @@ reference_genome_path = "/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.gen
 reference_genome_gt_path = "/homes/gws/sdorkenw/reference_genome_38/genes_GRCh38.gtf"
 # reference_genome_gt_path = "/homes/gws/sdorkenw/reference_genome_38/data/ref_genomes/m10_genes.gtf"
 # reference_genome_gt_path = "/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf"
-reference_genome_exon_gt_path = "/homes/gws/sdorkenw/reference_genome_38/genes_exons.gtf"
+# reference_genome_exon_gt_path = "/homes/gws/sdorkenw/reference_genome_38/genes_exons.gtf"
 
 
 def create_sampled_accession_file(accession_folder, n_accessions_per_file=2):
@@ -262,13 +262,13 @@ def run_seqbias(bam_files, paired_end="TRUE",
 
 def main(input_dir, accession_file=None, count_only=False,
          n_processes=1):
-    # if accession_file is not None:
-    #     download_from_accession_file(input_dir, accession_file,
-    # sra_files = glob.glob(input_dir + "/*.sra")
-    #                                  n_processes=n_processes)
-    #
-    # # Convert sra files to fastq.gz files
-    # convert_sra_to_fastq(sra_files, n_processes=n_processes)
+    if accession_file is not None:
+        download_from_accession_file(input_dir, accession_file, n_processes=n_processes)
+
+    sra_files = glob.glob(input_dir + "/*.sra")
+
+    # Convert sra files to fastq.gz files
+    convert_sra_to_fastq(sra_files, n_processes=n_processes)
 
     fastq_files = glob.glob(input_dir + "/*.fastq.gz")
 
