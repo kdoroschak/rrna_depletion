@@ -79,7 +79,6 @@ class FeatureExtractor(object):
                 name_list.append(gf.name)
                 name_list.append(gf.name)
 
-        raise()
         gene_kdtree = scipy.spatial.cKDTree(gene_coordinates)
 
         for gtf_exon in gtf_exons:
