@@ -12,10 +12,10 @@ import time
 # reference_genome_path = "/homes/gws/sdorkenw/rrna/data/ref_genomes/GRCh38.p3_genomic.fa"
 # reference_genome_path = "/homes/gws/sdorkenw/reference_genome_38/genome_GRCh38.fa"
 # reference_genome_path = "/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa"
-# reference_genome_path = "/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa"
-reference_genome_path = "/homes/gws/sdorkenw/rrna/data/ref_genomes/m10_genome.fa"
-# reference_genome_gt_path = "/homes/gws/sdorkenw/reference_genome_38/genes_GRCh38.gtf"
-reference_genome_gt_path = "/homes/gws/sdorkenw/reference_genome_38/data/ref_genomes/m10_genes.gtf"
+reference_genome_path = "/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa"
+# reference_genome_path = "/homes/gws/sdorkenw/rrna/data/ref_genomes/m10_genome.fa"
+reference_genome_gt_path = "/homes/gws/sdorkenw/reference_genome_38/genes_GRCh38.gtf"
+# reference_genome_gt_path = "/homes/gws/sdorkenw/reference_genome_38/data/ref_genomes/m10_genes.gtf"
 # reference_genome_gt_path = "/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf"
 reference_genome_exon_gt_path = "/homes/gws/sdorkenw/reference_genome_38/genes_exons.gtf"
 
@@ -102,7 +102,7 @@ def _run_rsubread_worker(args):
     prefix = ""
     for string in re.findall("[\w]+", base_name)[::-1]:
         if not string in ["fastq", "gz", "bam", "fq"]:
-            prefix = string
+            prefix = string[:-2]
             break
 
     call = "Rscript --vanilla /homes/gws/sdorkenw/src/rna/run_rsubread_on_fastq.R %s %s %s %s %s %s %d %d" % \
@@ -116,9 +116,10 @@ def run_rsubread(fastq_files, n_processes=2, n_gb=10, n_threads=2):
     if n_processes % n_threads > 0:
         n_processes += n_threads - n_processes % n_threads
 
-    mem = psutil.virtual_memory().free/1024**3
-    if n_processes / 2. * n_gb > mem*.7:
-        raise Exception("RAM usage too high for requested task")
+    mem = (psutil.virtual_memory().available)/1024**3
+    if n_processes / 2. * n_gb > mem*.9:
+        raise Exception("RAM usage too high for requested task: %f.1 GB / %f.1 GB" %
+                        (n_processes / 2. * n_gb, mem))
 
     paths = []
     for path_1 in fastq_files:
@@ -261,14 +262,14 @@ def run_seqbias(bam_files, paired_end="TRUE",
 
 def main(input_dir, accession_file=None, count_only=False,
          n_processes=1):
-    if accession_file is not None:
-        download_from_accession_file(input_dir, accession_file,
-                                     n_processes=n_processes)
+    # if accession_file is not None:
+    #     download_from_accession_file(input_dir, accession_file,
+    # sra_files = glob.glob(input_dir + "/*.sra")
+    #                                  n_processes=n_processes)
+    #
+    # # Convert sra files to fastq.gz files
+    # convert_sra_to_fastq(sra_files, n_processes=n_processes)
 
-    sra_files = glob.glob(input_dir + "/*.sra")
-
-    # Convert sra files to fastq.gz files
-    convert_sra_to_fastq(sra_files, n_processes=n_processes)
     fastq_files = glob.glob(input_dir + "/*.fastq.gz")
 
     if count_only:
@@ -282,7 +283,7 @@ def main(input_dir, accession_file=None, count_only=False,
     bam_files = glob.glob(input_dir + "/*.bam")
 
     sort_and_index_bams(bam_files, n_processes=n_processes)
-    # sorted_bam_files = glob.glob(input_dir + "/*/*_sorted.bam")
+    # sorted_bam_files = glob.glob(input_dir + "/*/*_s.bam")
     # time_s = time.time()
     # run_seqbias(sorted_bam_files, n_processes=n_processes, n_threads=1)
     # print "Time: %.3fs" % (time.time() - time_s)

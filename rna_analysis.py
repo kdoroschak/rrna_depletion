@@ -6,6 +6,7 @@ import os
 import pysam
 import re
 import scipy.stats
+from multiprocessing import Pool
 
 
 def read_values_from_file(path):
@@ -111,15 +112,32 @@ def analyse_highest_ranking_genes(n=100, plot_path=None):
 
 
 def get_multiple_ribo_ratios(re_bam_path="/homes/gws/sdorkenw/rrna/data/rsubread_aligned_v2/SRR89124*_1_s.bam",
-                             ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf"):
+                             ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf",
+                             from_star=False, n_processes=1):
     bam_paths = glob.glob(re_bam_path)
 
-    ratios = {}
+    multi_params = []
     for path in bam_paths:
         name = os.path.basename(path).split("_")[0]
-        ratios[name] = get_ribo_ratio(path, ribo_path)
+        multi_params.append([name, path, ribo_path, from_star])
+
+    if n_processes > 1:
+        pool = Pool(n_processes)
+        results = pool.map(_get_multiple_ribo_ratios_worker, multi_params)
+        pool.close()
+        pool.join()
+    else:
+        results = map(_get_multiple_ribo_ratios_worker, multi_params)
+
+    ratios = {}
+    for result in results:
+        ratios[result[0]] = result
 
     return ratios
+
+
+def _get_multiple_ribo_ratios_worker(args):
+    return [args[0], get_ribo_ratio(args[1], args[2], args[3])]
 
 
 def get_ribo_ratio(bam_path="/homes/gws/sdorkenw/rrna/data/rsubread_aligned_v2/SRR891242_1_s.bam",

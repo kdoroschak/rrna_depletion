@@ -4,12 +4,28 @@ import pysam # pip install pysam
 import cPickle as pkl
 from itertools import islice, takewhile, count
 import glob
-from multiprocessing import Pool
+import multiprocessing
+import multiprocessing.pool
 import numpy as np
 import os
 import plotUtils as pu
 import re
 import time
+
+class NoDaemonProcess(multiprocessing.Process):
+    # make 'daemon' attribute always return False
+    def _get_daemon(self):
+        return False
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+
+# We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
+# because the latter is only a wrapper function, not a proper class.
+class NoDaemonPool(multiprocessing.pool.Pool):
+    Process = NoDaemonProcess
+
+
 
 
 def extract_kmers_from_sequence_thread(args):
@@ -43,7 +59,7 @@ def extract_kmers_from_sequence(seq, k=6, reverse_complement=False, n_worker=1,
             multi_params.append([seq[i * step: ], k, reverse_complement])
 
     if n_worker > 1:
-        pool = Pool(n_worker)
+        pool = NoDaemonPool(n_worker)
         results = pool.map(extract_kmers_from_sequence_thread, multi_params)
         pool.close()
         pool.join()
@@ -57,12 +73,12 @@ def extract_kmers_from_sequence(seq, k=6, reverse_complement=False, n_worker=1,
 
 
 def extract_kmers_in_ribosome_region(k=14,
-                                     # ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf",
-                                     # reference_fasta_path="/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa",
-                                     ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/mm10_rmsk.gtf",
-                                     reference_fasta_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/m10_genome.fa",
+                                     ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf",
+                                     reference_fasta_path="/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa",
+                                     # ribo_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/mm10_rmsk.gtf",
+                                     # reference_fasta_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/m10_genome.fa",
                                      # reference_chr_path="/homes/gws/sdorkenw/rrna/data/chr_fasta/*.fna",
-                                     save_folder="/homes/gws/sdorkenw/rrna/data/kmer_analysis/",
+                                     save_folder="/homes/gws/sdorkenw/rrna/data/kmer_analysis_chromatin/",
                                      reload=True, reverse_complement=True,
                                      n_worker=1):
     if "m10" in ribo_path:
@@ -220,7 +236,7 @@ def kmer_analysis_per_base(bam_path="/homes/gws/sdorkenw/rrna/data/alignments/SR
 
 
     if n_workers > 1:
-        pool = Pool(n_workers)
+        pool = NoDaemonPool(n_workers)
         results = pool.map(kmer_analysis_per_base_thread, multi_params)
         pool.close()
         pool.join()
@@ -234,11 +250,38 @@ def kmer_analysis_per_base(bam_path="/homes/gws/sdorkenw/rrna/data/alignments/SR
         coverage_nonribo.append(result[1])
 
     if contiguous:
-        np.save(save_path + "coverage_ribo_k%d_%s_cont" % (k, re.findall("[\d]+", bam_path)[-2]), coverage_ribo)
-        np.save(save_path + "coverage_nonribo_k%d_%s_cont" % (k, re.findall("[\d]+", bam_path)[-2]), coverage_nonribo)
+        np.save(save_path + "coverage_ribo_k%d_%s_cont" % (k, re.findall("[\d]+", bam_path)[-1]), coverage_ribo)
+        np.save(save_path + "coverage_nonribo_k%d_%s_cont" % (k, re.findall("[\d]+", bam_path)[-1]), coverage_nonribo)
     else:
-        np.save(save_path + "coverage_ribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-2]), coverage_ribo)
-        np.save(save_path + "coverage_nonribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-2]), coverage_nonribo)
+        np.save(save_path + "coverage_ribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-1]), coverage_ribo)
+        np.save(save_path + "coverage_nonribo_k%d_%s" % (k, re.findall("[\d]+", bam_path)[-1]), coverage_nonribo)
+
+
+def kmer_analysis_per_base_multiple(re_bam_path,
+                                    fa_path="/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa",
+                                    save_path="/homes/gws/sdorkenw/rrna/data/kmer_analysis_chromatin/",
+                                    quality_threshold=0, contiguous=False,
+                                    k=14, n_workers=7, n_workers_worker=10):
+
+    bam_paths = glob.glob(re_bam_path)
+    multi_params = []
+    for bam_path in bam_paths:
+        multi_params.append([bam_path, fa_path, save_path, quality_threshold,
+                             contiguous, k, n_workers_worker])
+
+    if n_workers > 1:
+        pool = NoDaemonPool(n_workers)
+        pool.map(_kmer_analysis_per_base_multiple_thread, multi_params)
+        pool.close()
+        pool.join()
+    else:
+        map(_kmer_analysis_per_base_multiple_thread, multi_params)
+
+
+def _kmer_analysis_per_base_multiple_thread(args):
+    kmer_analysis_per_base(args[0], args[1], args[2], args[3],
+                           args[4], args[5], args[6])
+
 
 def kmer_analysis_per_read_thread(args):
     reads = args[0]
@@ -298,7 +341,7 @@ def kmer_analysis_per_read(bam_path="/homes/gws/sdorkenw/rrna/data/alignments/SR
         multi_params.append([split_reads.next(), k, start_only])
 
     if n_workers > 1:
-        pool = Pool(n_workers)
+        pool = NoDaemonPool(n_workers)
         results = pool.map(kmer_analysis_per_read_thread, multi_params)
         pool.close()
         pool.join()
@@ -331,7 +374,7 @@ def clean_whole_kmer_analysis(re_path, k):
     paths = glob.glob(re_path)
     for path in paths:
         if not "cleaned" in path:
-            clean_kmer_analysis(path, k, path[:-4] + "cleaned.npy")
+            clean_kmer_analysis(path, k, path[:-4] + "_cleaned.npy")
 
 
 def clean_kmer_analysis(path, k, save_path,
