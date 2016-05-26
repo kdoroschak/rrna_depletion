@@ -31,8 +31,8 @@ def check_chromosome(chrom):
 class FeatureExtractor(object):
     def __init__(self,
                  fasta_file_path=home_path+"/rrna/data/ref_genomes/GRCh38_o.p3.genome.fa",
-                 gtf_file_path=home_path+"/rrna/data/annotations/genes_GRCh38.gtf",
-                 save_path=home_path+"/rrna/data/featureExtractors/gene_features.pkl"):
+                 gtf_file_path=home_path+"/rrna/data/annotations/Homo_sapiens.GRCh38.84.gtf",
+                 save_path=home_path+"/rrna/data/featureExtractors/Homo_sapiens.GRCh38.84_gene_features.pkl"):
 
         self.fasta_file_path = fasta_file_path
         self.gtf_file_path = gtf_file_path
@@ -146,12 +146,12 @@ class GeneFeatures(object):
     @property
     def start(self):
         self.exons = sorted(self.exons)
-        return self.exons[0][0]
+        return np.min(self.exons)
 
     @property
     def end(self):
         self.exons = sorted(self.exons)
-        return self.exons[-1][1]
+        return np.max(self.exons)
 
     def generate_full_sequence(self, fasta_seq):
         self.exons = sorted(self.exons)
