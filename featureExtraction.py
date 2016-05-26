@@ -13,6 +13,7 @@ import re
 import scipy.spatial
 import time
 
+home_path = os.path.expanduser("~")
 
 def check_chromosome(chrom):
     if chrom in ["chr%d" % (i+1) for i in range(22)]:
@@ -29,10 +30,10 @@ def check_chromosome(chrom):
 
 class FeatureExtractor(object):
     def __init__(self,
-                 fasta_file_path="~/rrna/data/ref_genomes/GRCh38_o.p3.genome.fa",
-                 gtf_file_path="~/rrna/data/annotations/genes_GRCh38.gtf",
-                 save_path="~/rrna/data/featureExtractors/gene_features.pkl"):
-    
+                 fasta_file_path=home_path+"/rrna/data/ref_genomes/GRCh38_o.p3.genome.fa",
+                 gtf_file_path=home_path+"/rrna/data/annotations/genes_GRCh38.gtf",
+                 save_path=home_path+"/rrna/data/featureExtractors/gene_features.pkl"):
+
         self.fasta_file_path = fasta_file_path
         self.gtf_file_path = gtf_file_path
         self.gtf_db_path = self.gtf_file_path[:-4] + "features.db"
