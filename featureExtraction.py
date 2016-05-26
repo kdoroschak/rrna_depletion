@@ -28,7 +28,11 @@ def check_chromosome(chrom):
 
 
 class FeatureExtractor(object):
-    def __init__(self, fasta_file_path, gtf_file_path, save_path):
+    def __init__(self,
+                 fasta_file_path="~/rrna/data/ref_genomes/GRCh38_o.p3.genome.fa",
+                 gtf_file_path="~/rrna/data/annotations/genes_GRCh38.gtf",
+                 save_path="~/rrna/data/featureExtractors/gene_features.pkl"):
+    
         self.fasta_file_path = fasta_file_path
         self.gtf_file_path = gtf_file_path
         self.gtf_db_path = self.gtf_file_path[:-4] + "features.db"
@@ -94,6 +98,7 @@ class FeatureExtractor(object):
             fasta_seqs[anno.name] = anno.seq
 
         for gf_key in self.genefeatures.keys():
+            print gf_key
             gf = self.genefeatures[gf_key]
             chrom, accepted = check_chromosome(gf.chrom)
             if accepted:
