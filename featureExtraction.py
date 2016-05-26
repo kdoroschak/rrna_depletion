@@ -14,20 +14,17 @@ import scipy.spatial
 import time
 
 
-def generate_chrom_mapper(factor=1e6):
-    chrom_mapper = {}
-
-    rev_chrom_mapper = {}
-    for ichrom in range(22):
-        chrom_mapper["chr%d" % (ichrom + 1)] = ichrom * factor
-        rev_chrom_mapper[ichrom * factor] = "chr%d" % (ichrom + 1)
-
-    chrom_mapper["chrX"] = 23 * factor
-    rev_chrom_mapper[23 * factor] = "chrX"
-    chrom_mapper["chrY"] = 24 * factor
-    rev_chrom_mapper[24 * factor] = "chrY"
-
-    return chrom_mapper
+def check_chromosome(chrom):
+    if chrom in ["chr%d" % (i+1) for i in range(22)]:
+        return chrom, True
+    elif chrom in ["chrX", "chrY"]:
+        return chrom, True
+    elif chrom in ["%d" % (i+1) for i in range(22)]:
+        return "chr%s" % chrom, True
+    elif chrom in ["X", "Y"]:
+        return "chr%s" % chrom, True
+    else:
+        return None, False
 
 
 class FeatureExtractor(object):
@@ -57,39 +54,34 @@ class FeatureExtractor(object):
             if os.path.exists(self.gtf_db_path):
                 os.remove(self.gtf_db_path)
             gtf_db = gffutils.create_db(self.gtf_file_path,
-                                        dbfn=self.gtf_db_path)
+                                        dbfn=self.gtf_db_path,
+                                        disable_infer_transcripts=True,
+                                        disable_infer_genes=True)
 
         gtf_features = np.array(list(gtf_db.all_features()))
         gtf_types = np.array([f.featuretype for f in gtf_features])
-        gtf_genes = gtf_features[gtf_types == "gene"]
+        # gtf_genes = gtf_features[gtf_types == "gene"]
         gtf_exons = gtf_features[gtf_types == "exon"]
         # gtf_features = None
         # gtf_types = None
 
-        chrom_mapper = generate_chrom_mapper()
-
-        gene_coordinates = []
-        name_list = []
-        for gtf_gene in gtf_genes:
-            if gtf_gene.chrom in chrom_mapper:
-                gf = GeneFeatures(gtf_gene)
-                self.genefeatures[gtf_gene.id] = gf
-                gene_coordinates.append([chrom_mapper[gf.chrom], gf.start])
-                gene_coordinates.append([chrom_mapper[gf.chrom], gf.end])
-                name_list.append(gf.name)
-                name_list.append(gf.name)
-
-        gene_kdtree = scipy.spatial.cKDTree(gene_coordinates)
-
         for gtf_exon in gtf_exons:
-            if gtf_exon.chrom in chrom_mapper:
-                _, id = gene_kdtree.query([chrom_mapper[gtf_exon.chrom],
-                                           gtf_exon.start])
-                gene_name = name_list[id]
-                assert gene_coordinates[id][0] == \
-                       chrom_mapper[self.genefeatures[gene_name].chrom]
-                self.genefeatures[gene_name].exons.append([gtf_exon.start,
-                                                           gtf_exon.end])
+            chrom, accepted = check_chromosome(gtf_exon.chrom)
+
+            if accepted:
+                if "gene_name" in gtf_exon.attributes.keys():
+                    gene_name = gtf_exon.attributes["gene_name"][0]
+                else:
+                    gene_name = gtf_exon.attributes["gene_id"][0]
+
+                if gene_name in self.genefeatures:
+                    self.genefeatures[gene_name].exons.append([gtf_exon.start,
+                                                               gtf_exon.end])
+                else:
+                    gf = GeneFeatures(gene_name, chrom)
+                    self.genefeatures[gene_name] = gf
+                    self.genefeatures[gene_name].exons.append([gtf_exon.start,
+                                                               gtf_exon.end])
 
         f = open(self.gf_save_path, "w")
         pkl.dump(self.genefeatures, f)
@@ -103,8 +95,10 @@ class FeatureExtractor(object):
 
         for gf_key in self.genefeatures.keys():
             gf = self.genefeatures[gf_key]
-            gf.generate_full_sequence(fasta_seqs[gf.chrom])
-            gf.partition_sequence_in_chunks(chunk_size=50)
+            chrom, accepted = check_chromosome(gf.chrom)
+            if accepted:
+                gf.generate_full_sequence(fasta_seqs[gf.chrom])
+                gf.partition_sequence_in_chunks(chunk_size=50)
 
         # f = open(self.gf_save_path, "w")
         # pkl.dump(self.genefeatures, f)
@@ -132,17 +126,26 @@ class FeatureExtractor(object):
 
 
 class GeneFeatures(object):
-    def __init__(self, gtf_gene):
-        self.chrom = gtf_gene.chrom
-        self.start = gtf_gene.start
-        self.end = gtf_gene.end
-        self.name = gtf_gene.id
+    def __init__(self, gene_name, chrom):
+        self.chrom = chrom
+        self.name = gene_name
 
         self.exons = []
         self.chunk_size = 0
         self.chunks = []
         self.chunk_locs = []
         self.sequence = ""
+        self.coverage = None
+
+    @property
+    def start(self):
+        self.exons = sorted(self.exons)
+        return self.exons[0][0]
+
+    @property
+    def end(self):
+        self.exons = sorted(self.exons)
+        return self.exons[-1][1]
 
     def generate_full_sequence(self, fasta_seq):
         self.exons = sorted(self.exons)
@@ -172,7 +175,8 @@ class GeneFeatures(object):
 
     def calculate_mean_coverage(self, pfile):
         pileupcolumns = pfile.pileup(self.chrom, self.start, self.end)
-        return np.mean([c.n for c in pileupcolumns])
+        self.coverage = np.mean([c.n for c in pileupcolumns])
+        return self.coverage
 
     def calculate_chunkwise_coverage(self, pfile):
         coverage = []
@@ -191,26 +195,38 @@ class GeneFeatures(object):
 
         return coverage
 
-    def calculate_kmers(self, k):
+    def calculate_kmers(self, k, ignore_N=True):
         kmers = []
 
-        if k > len(self.sequence):
+        if k < len(self.sequence):
             for pos in range(len(self.sequence) - k):
-                kmers.append(self.sequence[pos:, pos + k])
+                seq = self.sequence[pos: pos + k]
+                if not "N" in seq:
+                    kmers.append(seq)
 
         return kmers
 
-    def calculate_kmers_and_coverage(self, k, pfile):
+    def calculate_kmers_and_coverage(self, k, pfile, ignore_N=True):
         kmers_cov = []
-        if k > len(self.sequence):
-            seq_coverage = np.zeros(len(self.sequence))
+        if k < len(self.sequence):
+            seq_coverage = np.zeros(self.end - self.start)
             pileupcolumns = pfile.pileup(self.chrom, self.start, self.end)
 
             for column in pileupcolumns:
-                seq_coverage[column.pos-self.start] = column.n
+                if 0 <= column.pos-self.start < len(seq_coverage):
+                    seq_coverage[column.pos-self.start] = column.n
 
-            for pos in range(len(self.sequence)-k):
-                kmers_cov.append([self.sequence[pos:, pos+k],
-                                  np.mean(seq_coverage[pos: pos+k])])
+            self.exons = sorted(self.exons)
+
+            glued_seq_coverage = []
+            for exon in self.exons:
+                glued_seq_coverage += seq_coverage[exon[0]: exon[1]].tolist()
+
+            glued_seq_coverage = np.array(glued_seq_coverage)
+            for pos in range(len(glued_seq_coverage)-k):
+                seq = self.sequence[pos: pos + k]
+                if not ignore_N or not "N" in seq:
+                    kmers_cov.append([seq,
+                                      np.mean(glued_seq_coverage[pos: pos+k])])
 
         return kmers_cov
