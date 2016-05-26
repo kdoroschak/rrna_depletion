@@ -19,8 +19,9 @@ def extract_ribo_kmers(k=18,
                        gtf_path="/homes/gws/sdorkenw/rrna/data/ref_genomes/rrna_hg38.gtf",
                        fasta_file_path="/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa",
                        save_path="/homes/gws/sdorkenw/rrna/data/featureExtractors/ribo_features.pkl"):
-    fe = featureExtraction.FeatureExtractor(fasta_file_path, gtf_path,
-                                            save_path)
+    # fe = featureExtraction.FeatureExtractor(fasta_file_path, gtf_path,
+    #                                         save_path)
+    fe = featureExtraction.FeatureExtractor()
 
     if not fe.load_gene_features():
         fe.generate_gene_features(reload=True)
@@ -29,21 +30,24 @@ def extract_ribo_kmers(k=18,
 
     kmers = set()
     for gf_key in fe.genefeatures.keys():
+        print gf_key
         gf = fe.genefeatures[gf_key]
         kmers = kmers.union(set(gf.calculate_kmers(k=k)))
 
     return kmers
 
 
-def extract_gene_kmers(bam_path, k=18,
+def extract_gene_kmers(bam_path,
+                       k=18,
                        gtf_path="/homes/gws/sdorkenw/rrna/data/annotations/Homo_sapiens.GRCh38.84.gtf",
                        fasta_file_path="/homes/gws/sdorkenw/reference_genome_38/GRCh38_o.p3.genome.fa",
                        save_path="/homes/gws/sdorkenw/rrna/data/featureExtractors/gene_features.pkl"):
-    fe = featureExtraction.FeatureExtractor(fasta_file_path, gtf_path,
-                                            save_path)
+    # fe = featureExtraction.FeatureExtractor(fasta_file_path, gtf_path,
+    #                                         save_path)
+    fe = featureExtraction.FeatureExtractor()
 
-    # if not fe.load_gene_features():
-    fe.generate_gene_features(reload=True)
+    if not fe.load_gene_features():
+        fe.generate_gene_features(reload=True)
 
     # fe.generate_chunked_sequences()
 
