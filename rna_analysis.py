@@ -48,7 +48,7 @@ def merge_rank_dicts(rank_dicts):
     return rank_genes(overall_ranking)#, invert_sorting=False)
 
 
-def compare_highest_ranking_genes(re_path="/homes/gws/sdorkenw/rrna/data/rsubread_aligned_v2/SRR89124*fpkm",
+def compare_highest_ranking_genes(re_path="/homes/gws/sdorkenw/rrna/data/rsubread_aligned_v2/SRR89124[0-9]_fpkm",
                                   n=25):
     paths = glob.glob(re_path)
 

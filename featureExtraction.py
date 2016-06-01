@@ -142,6 +142,7 @@ class GeneFeatures(object):
         self.chunk_locs = []
         self.sequence = ""
         self.coverage = None
+        self.chunk_coverage = []
 
     @property
     def start(self):
@@ -182,24 +183,18 @@ class GeneFeatures(object):
     def calculate_mean_coverage(self, pfile):
         pileupcolumns = pfile.pileup(self.chrom, self.start, self.end)
         self.coverage = np.mean([c.n for c in pileupcolumns])
-        return self.coverage
 
     def calculate_chunkwise_coverage(self, pfile):
-        coverage = []
+        self.chunk_coverage = []
+
         pileupcolumns = pfile.pileup(self.chrom, self.start, self.end)
-        gene_coverage = {}
+        seq_coverage = np.zeros(self.end - self.start)
         for column in pileupcolumns:
-            gene_coverage[column.pos] = column.n
+            if 0 <= column.pos - self.start < len(seq_coverage):
+                seq_coverage[column.pos - self.start] = column.n
 
         for chunk_loc in self.chunk_locs:
-            chunk_coverage = 0
-            for pos in range(chunk_loc[0], chunk_loc[1]):
-                if pos in gene_coverage:
-                    chunk_coverage += gene_coverage[pos]
-
-            coverage.append(chunk_coverage / float(self.chunk_size))
-
-        return coverage
+            self.chunk_coverage.append(seq_coverage[chunk_loc[0]: chunk_loc[1]])
 
     def calculate_kmers(self, k, ignore_N=True):
         kmers = []
