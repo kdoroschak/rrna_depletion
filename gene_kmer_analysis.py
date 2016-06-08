@@ -9,10 +9,14 @@ import numpy as np
 import os
 import plotUtils as pu
 import re
+import scipy.spatial
 import sklearn.neighbors
 import sklearn.decomposition
 import sklearn.preprocessing
+import sklearn.ensemble
+import sklearn.linear_model
 import time
+import rna_analysis as ra
 
 import featureExtraction
 
@@ -247,6 +251,25 @@ def _extract_expression_features_thread(args):
                     pkl.dump(coverage, f)
 
 
+def combine_expression_features(re_path):
+    paths = glob.glob(re_path)
+    exp_dict = {}
+    for path in paths:
+        print path
+        with open(path) as f:
+            this_dict = pkl.load(f)
+
+        exp_dict.update(this_dict)
+
+    save_path = paths[0][:-6] + ".pkl"
+    print save_path
+    with open(save_path, "w") as f:
+        pkl.dump(exp_dict, f)
+
+    # return exp_dict
+
+
+
 def extract_hamming_distance_feature(path_ribo_kmers=home_path +
                                      "/rrna/data/featureExtractors/ribo_kmers_from_genes_50_int.npy",
                                      path_ordered_gene_names = home_path +
@@ -298,44 +321,183 @@ def agglomerate_features(folder=home_path + "/rrna/data/featureExtractors/",
 
     consensus_genes = consensus_genes.union(dist_dict.keys())
 
-    with open(folder + "/coverage_features_891246_copy.pkl") as f:
-        expression_dict = pkl.load(f)
+    expressions = []
+    for i in range(1, 7):
+        with open(folder + "/coverage_features_89124%d.pkl" % i, "r") as f:
+            print folder + "/coverage_features_89124%d.pkl" % i
+            expressions.append(pkl.load(f))
 
-    consensus_genes = consensus_genes.intersection(expression_dict.keys())
+        consensus_genes = consensus_genes.intersection(expressions[-1].keys())
+
+    raw_names = np.load(home_path + "/rrna/data/rnafold_results/row_names.npy")[:, 0]
+    folding_energy = np.load(home_path + "/rrna/data/rnafold_results/mfe.npy")
+    contact_probs = np.load(home_path + "/rrna/data/rnafold_results/pair_probs.npy")
+
+    # folding_dict = {}
+    # for i_sample in range(len(folding_energy)):
+    #     if not raw_names[i_sample] in folding_dict:
+    #         folding_dict[raw_names[i_sample]] = []
+    #     folding_dict[raw_names[i_sample]].append([folding_energy[i_sample]] + contact_probs[i_sample].tolist())
+
+    # consensus_genes = consensus_genes.intersection(folding_dict.keys())
 
     chunks = []
     ribo_chunks = []
     ribo = []
     gene_dists = []
     gene_names = []
+    ribo_chunkwise_gene_names = []
+    chunkwise_gene_names = []
     gene_cov = []
     print "There are %d genes in the consensus set" % len(consensus_genes)
     for gene in consensus_genes:
-        expressions = expression_dict[gene]
-        this_gene_cov = np.mean(expressions[:, 0])
+        # expressions = expression_dict[gene]
+        this_gene_cov = [np.mean(expressions[i][gene][:, 0]) for i in range(6)]
 
-        if this_gene_cov > 0:
-            gene_cov.append(this_gene_cov)
-
-            gene_names.append(gene)
-
+        if np.sum(this_gene_cov) > 0:
+            # foldings = folding_dict[gene]
             dists = dist_dict[gene]
-            gene_dists.append(np.mean(dists))
+            # if len(dists) == len(foldings):
+            if True:
+                gene_cov.append(this_gene_cov)
+                gene_names.append(gene)
 
-            relative_expression = expressions[:, 0:1] / gene_cov[-1]
+                gene_dists.append(np.mean(dists))
 
-            if gene in ribo_genes or gene.startswith("MRP") or gene.startswith("RP"):
-                ribo.append(True)
-                ribo_chunks += np.hstack([dists, expressions, relative_expression]).tolist()
+                gene_expressions = np.hstack([expressions[i][gene] for i in range(6)])
+                relative_expression = []
+                for i in range(6):
+                    if this_gene_cov[i] > 0:
+                        relative_expression.append(expressions[i][gene][:, 0] / this_gene_cov[i])
+                    else:
+                        relative_expression.append(np.zeros_like(expressions[i][gene][:, 0]))
+                relative_expression = np.array(relative_expression).T
+
+                if gene in ribo_genes or gene.startswith("MRP") or gene.startswith("RP"):
+                    ribo.append(True)
+                    # ribo_chunks += np.hstack([dists, foldings, gene_expressions, relative_expression, np.array([1]*len(foldings)).reshape(len(foldings), 1)]).tolist()
+                    ribo_chunks += np.hstack([dists, gene_expressions, relative_expression]).tolist()
+                    ribo_chunkwise_gene_names += [gene] * len(dists)
+                else:
+                    ribo.append(False)
+                    # chunks += np.hstack([dists, foldings, gene_expressions, relative_expression, np.array([0]*len(foldings)).reshape(len(foldings))]).tolist()
+                    chunks += np.hstack([dists, gene_expressions, relative_expression]).tolist()
+                    chunkwise_gene_names += [gene] * len(dists)
             else:
-                ribo.append(False)
-                chunks += np.hstack([dists, expressions, relative_expression]).tolist()
+                print gene, len(dists)
+        else:
+            print gene
+
+    output = [np.array(chunks), np.array(ribo_chunks), np.array(ribo),
+              np.array(gene_dists), np.array(gene_cov), np.array(gene_names),
+              np.array(chunkwise_gene_names), np.array(ribo_chunkwise_gene_names)]
+    np.save(folder + "/agglomerated_features.pkl", output)
 
     return np.array(chunks), np.array(ribo_chunks), np.array(ribo), \
-           np.array(gene_dists), np.array(gene_cov), np.array(gene_names)
+           np.array(gene_dists), np.array(gene_cov), np.array(gene_names), \
+           np.array(chunkwise_gene_names), np.array(ribo_chunkwise_gene_names)
+
 
 
 def pca_analysis(data):
     data = sklearn.preprocessing.scale(data)
     pca = sklearn.decomposition.PCA(n_components=.999)
     return pca.fit_transform(data)
+
+
+def calc_ribo_ratio(count_path, ribo_gene_name_path="/homes/gws/sdorkenw/rrna/data/annotations/Homo_sapiens.GRCh38.84_rrna_gene_names.npy"):
+    ribo_genes = np.load(ribo_gene_name_path)
+
+    count_dict = ra.read_values_from_file(count_path)
+
+    with open(home_path + "/rrna/data/featureExtractors/gene_name_mapper.pkl", "r") as f:
+        mapper = pkl.load(f)
+
+    non_ribo_count_sum = 0
+    ribo_count_sum = 0
+    for name in count_dict:
+        if name in mapper:
+            gene = mapper[name][0]
+            if gene in ribo_genes or gene.startswith("MRP") or gene.startswith("RP"):
+                ribo_count_sum += count_dict[name]
+            else:
+                non_ribo_count_sum += count_dict[name]
+            # print ribo_count_sum, non_ribo_count_sum
+
+    print "Ribosomal ratio: %.4f" % (ribo_count_sum / (ribo_count_sum + non_ribo_count_sum))
+
+
+def balance_data(x, y, nbins=10):
+    bins = np.linspace(0.0, 0.5, nbins)
+    idx = np.digitize(y, bins)
+    sums = np.array([np.sum(np.ones_like(y)[idx == k+1]) for k in range(nbins)])
+    sums = 1./sums
+    sums /= np.min(sums)
+    sums[0] = 0
+    weights = np.array([sums[idx[y_sample]-1] for y_sample in range(len(y))], dtype=np.int)
+
+    new_x = []
+    new_y = []
+
+    for i_sample in range(len(y)):
+        new_x += [x[i_sample]]*weights[i_sample]
+        new_y += [y[i_sample]]*weights[i_sample]
+
+    return new_x, new_y
+
+
+def balance_data_binary(x, y):
+    y_1 = y[y==1]
+    x_1 = x[y==1]
+    new_y = y.tolist()
+    new_x = x.tolist()
+    for i_iter in range(int(np.sum(y == 0)-np.sum(y==0))):
+        new_y.append(y_1[i_iter % len(y_1)])
+        new_x.append(x_1[i_iter % len(y_1)])
+    return new_x, new_y
+
+
+def regression(x, y, classifier="rfc"):
+    # bx, by = balance_data(x, y)
+
+    ids = np.arange(len(y))
+    np.random.shuffle(ids)
+    bx_tr, by_tr = balance_data_binary(x[ids][:int(.75 * len(x))],
+                                       y[ids][:int(.75 * len(x))])
+    bx_va, by_va = balance_data_binary(x[ids][:int(.75 * len(x))],
+                                       y[ids][:int(.75 * len(x))])
+
+    if classifier == "rfc":
+        clf = sklearn.ensemble.RandomForestRegressor(n_jobs=50, n_estimators=20)
+    elif classifier == "gbr":
+        clf = sklearn.ensemble.GradientBoostingRegressor()
+    elif "lin":
+        clf = sklearn.linear_model.LinearRegression(normalize=True, n_jobs=50)
+    else:
+        raise()
+
+    fit = clf.fit(bx_tr, by_tr)
+
+    with open(home_path + "/rrna/data/regression/%s.pkl" % classifier, "w") as f:
+        pkl.dump(clf, f)
+
+    pred_y = clf.predict(bx_va)
+    print np.mean(np.abs(by_va - pred_y)), np.mean(np.abs(by_va - np.mean(by_va)))
+    print np.sqrt(np.mean((pred_y - by_va)**2)), np.sqrt(np.mean((np.mean(by_va) - by_va)**2))
+    pred_y = clf.predict(bx)
+    print np.mean(np.abs(by-pred_y)), np.mean(np.abs(by-np.mean(by)))
+    print np.sqrt(np.mean((pred_y - by)**2)), np.sqrt(np.mean((np.mean(by) - by)**2))
+
+
+def secondary_structure_distance(non_ribo_structures, ribo_structures):
+    kdtree = scipy.spatial.cKDTree(ribo_structures)
+
+    dists = []
+    time_start = time.time()
+    for cnt in range(len(non_ribo_structures)):
+        print "%d - Time: %.3fs" % (cnt, time.time() - time_start)
+        cp = kdtree.query(non_ribo_structures[cnt], k=1, n_jobs=50)
+        dists.append(cp[0])
+
+    return dists
+
