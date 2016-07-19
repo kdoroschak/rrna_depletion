@@ -4,72 +4,116 @@ import os
 import numpy as np
 import cPickle as pkl
 from multiprocessing import Pool
+from operator import itemgetter
+import sys
+import signal
 
-from featureExtraction import *
-# get input sequence
-# generate id
-# Save sequence to temporary file id.fa 
-# run mfold for that temp id
-# delete id.fa
-# read in id.plot
-# delete id.plot
-# marginalize id.plot table
-# read in id.ann
-# delete id.ann
-#%start of base pair probability data
+if sys.platform == "darwin":
+  base = "/Volumes/cycle/"
+else:
+  base = "/homes/gws/" + os.getlogin() + "/" # make portable for katies and svens
 
-def predict_secondary_for_chunks(feature_extractor, outfile_base):
+source_home = base + "rrna/src/"
+data_home = base + "rrna/data/"
+# rnafold_home = base + "software/ViennaRNA/"
+
+# TODO make everything save to a temporary folder instead of just the rundir
+
+def predict_secondary_for_chunks(feature_extractor, out_folder, T=68):
 	for feature in feature_extractor.genefeatures:
 		print feature
-		gene_name = feature.name
+		gene_name = feature
 		print gene_name
-		for chunk_i,chunk_seq in enumerate(feature.chunks):
-			_call_rnafold(chunk, chunk_i)
+		for chunk_i,chunk_seq in enumerate(feature_extractor.genefeatures[feature].chunks):
+			_call_rnafold([gene_name, chunk_seq, chunk_i, T, out_folder])
 		print feature.name # gene name
 
-def predict_secondary_for_chunks_parallel(fe,
-										  outfile_base, 
-										  n_processes=1):
-	T = 68
-	multi_params = []
-	for feature in fe.genefeatures:
-		gene_name = feature
-		for chunk_i,chunk_seq in enumerate(fe.genefeatures[feature].chunks):
-			multi_params.append([gene_name, chunk_seq, chunk_i, T])
+# def _write_struct_to_file(fname, q):
+# 	f = open(fname, 'wb') 
+# 	features = {}
+# 	while 1:
+# 		gene_name, seqid, mfe, marg_pair_probs = q.get()
+# 		if features.get(gene_name):
+# 			features[gene_name].append([seqid, mfe, marg_pair_probs])
+# 		else:
+# 			features[gene_name] = [seqid, mfe, marg_pair_probs]
 
+# 		if m == 'kill':
+# 			f.write('writer killed')
+# 			break
+#         pkl.dump(features, f)
+#         # f.flush()
+# 	f.close()
+
+ #    	
+
+	# print len(features.keys())
+	# pkl.dump(features, outfile)
+
+
+def predict_secondary_for_chunks_parallel(fe,
+										  out_folder, 
+										  gene_list=None,
+										  n_processes=1,
+										  T=68):
+	
+	# Homo_sapiens.GRCh38.84_gene_names_ribo.npy
+	# genefeatures = np.load("/Volumes/cycle/rrna/data/featureExtractors/Homo_sapiens.GRCh38.84_ordered_gene_names.npy")
+	if gene_list is None:
+		genefeatures = np.load(data_home + "featureExtractors/Homo_sapiens.GRCh38.84_ordered_gene_names.npy")
+	else:
+		genefeatures = np.load(gene_list)
+
+	finished_genes = os.listdir(data_home + out_folder)
+	finished_genes = [os.path.splitext(i)[0] for i in finished_genes]
+	# f = open(outfile_base+".npy", "w")
+	# manager = Manager()
+	# q = manager.Queue()   
+	print len(finished_genes)
+
+	multi_params = []
+	features = {}
+	genes_not_in_db = []
+	for feature in genefeatures:
+		gene_name = feature
+		if gene_name in finished_genes:
+			continue
+
+		try:
+			fe.genefeatures[feature]
+		except:
+			print "Error: couldn't find gene " + gene_name + " in database."
+			genes_not_in_db.append(gene_name)
+			continue
+		print "Gene " + gene_name + " has " + str(len(fe.genefeatures[feature].chunks)) + " chunks."
+		for chunk_i,chunk_seq in enumerate(fe.genefeatures[feature].chunks):
+			multi_params.append([gene_name, chunk_seq, chunk_i, T, out_folder])
+
+	np.save("genes_not_in_db.npy", genes_not_in_db)
 	if n_processes > 1:
-		pool = Pool(n_processes)
-		results = pool.map(_call_rnafold, multi_params)
+		pool = Pool(n_processes, _init_pool)
+		# gene_name, seqid, mfe, contact_probs = pool.map(_call_rnafold, multi_params)
+		pool.map_async(_call_rnafold, multi_params)
+		print "Closing pool"
 		pool.close()
+		print "Joining pool"
 		pool.join()
 		multi_params = ""
 	else:
 		results = map(_call_rnafold, multi_params)
 
-	# Create map from results
-	features = {} # {gene name, [[chunk_id,mfe, contact_prob],...]}
-	for result in results:
-		gene_name = result[0]
-		seqid = result[1]
-		mfe = result[2]
-		contact_probs = result[3]
-		if features.get(gene_name):
-			features[gene_name].append([seqid, mfe, contact_probs])
-		else:
-			features[gene_name] = [seqid, mfe, contact_probs]
-
-	f = open(outfile_base+".npy", "w")
-	pkl.dump(features, f)
-	f.close()
 	return features
 
-
+def _init_pool():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def _call_rnafold(args): #T=68 is for ribozero # seq, seqid, T=68
 	gene_name = args[0]
 	seq = args[1]
-	seqid = args[2]
+	seqid = args[2] # chunk number
 	T = args[3]
+	out_folder = args[4]
+
 	# Save the sequence to a temp file so it can be used by rnafold
 	fname = gene_name + "_" + str(seqid)
 	print fname + " started"
@@ -77,29 +121,51 @@ def _call_rnafold(args): #T=68 is for ribozero # seq, seqid, T=68
 		f.write("> " + fname + "\n")
 		for seqline in textwrap.wrap(seq, width=80):
 			f.write(seqline+"\n")
+
 	# Call rnafold
-	subprocess.call("RNAFold -i %s -o %s -p -T %d" % \
+	print fname + "  calling rnafold"
+	subprocess.call("RNAfold -i %s -o %s -p -T %d" % \
 				   (fname + ".fa", fname, float(T)), 
 				   shell=True)
+
 	# Remove temp file
 	os.remove(fname + ".fa")
 	seqlength = len(seq)
 	pair_probs = _read_rnafold_dotplot(fname + "_dp.ps", seqlength)
-	marg_pair_probs = _marginalize_dotplot(pair_probs)
+	contact_probs = _summarize_dotplot(pair_probs)
 	mfe = _read_rnafold_mfe(fname + "_" + fname + ".fold")
 	os.remove(fname + "_dp.ps")
 	os.remove(fname + "_ss.ps")
 	os.remove(fname + "_" + fname + ".fold")
-	# pnum = _read_mfold_pnum(str(seqid) + ".ann", seqlength)
-	# hnum = _read_mfold_hnum(str(seqid) + ".hnum", seqlength)
 
+	# Write results
+	file_exists = os.path.isfile(data_home + out_folder + "/" + gene_name + ".npy")
+	f = ""
+	if file_exists:
+		f = open(data_home + out_folder + "/" + gene_name + ".npy", "r")
+		features = np.load(f)
+		f.close()
+		features[gene_name].append([seqid, mfe, contact_probs])
+		f = open(data_home + out_folder + "/" + gene_name + ".npy", "w")
+		pkl.dump(features, f)
+		f.close()
+	else:
+		f = open(data_home + out_folder + "/" + gene_name + ".npy", "w")
+		features = {}
+		features[gene_name] = [seqid, mfe, contact_probs]
+		pkl.dump(features, f)
+		f.close()
+	matrix_file = open(data_home + out_folder + "/matrices/" + gene_name + "_" + str(seqid) + "_matrix.npy", "w")
+	pkl.dump(pair_probs, matrix_file)
+	matrix_file.close()
+	
 	print fname + " finished"
-	return gene_name, seqid, mfe, marg_pair_probs
+	return gene_name, seqid, mfe, contact_probs
 
 def _read_rnafold_mfe(foldfile):
 	with open(foldfile,"r") as f:
 		lines = f.readlines()
-		mfe = str(lines[1].split()[2])[:-1]
+		mfe = str(lines[1].split()[-1]).replace("(", "").replace(")", "")
 	return float(mfe)
 
 def _read_rnafold_dotplot(plotfile, seqlength):
@@ -131,72 +197,161 @@ def _read_rnafold_dotplot(plotfile, seqlength):
 				pair_probs[j,i] = p
 	return pair_probs
 
-def _marginalize_dotplot(dotplot):
+def _summarize_dotplot(dotplot):
 	# Return the (col) vector of probs that each base i touches anything else
-	marg = np.sum(dotplot, axis=1)
+	marg = np.mean(dotplot, axis=1)
 	return marg
 
-# def _read_mfold_pnum(pnumfile, seqlength):
-# 	pnum = np.zeros(seqlength)
-# 	with open(pnumfile, "r") as f:
-# 		header = False #temp
-# 		for line in f:
-# 			if header == True:
-# 				continue
-# 			assert int(line[0])
-# 			i = int(line[0])
-# 			p = float(line[1])
-# 			pnum[i] = p
-# 	return pnum
+def create_feature_vector(source_folder, out_folder, order):
+	# source_folder = "/Volumes/cycle/rrna/data/rnafold/"
+	# out_folder = "rnafold"
+	# order = "/Volumes/cycle/rrna/data/featureExtractors/Homo_sapiens.GRCh38.84_ordered_gene_names.npy"
+
+	if sys.platform == "darwin":
+	  base = "/Volumes/cycle/rrna/"
+	else:
+	  base = "/homes/gws/kdorosch/rrna/"
+
+	finished_genes = [os.path.splitext(i)[0] for i in os.listdir(source_folder) if os.path.isfile(source_folder + i) and not i.startswith(".")]
+
+	# genes_to_select = np.load(base+"data/featureExtractors/Homo_sapiens.GRCh38.84_gene_names_ribo.npy")
+	# print genes_to_select
+	# print finished_genes
+	# finished_genes = set(finished_genes).intersection(set(genes_to_select))
+	# print finished_genes
+	
+	gene_ordering = np.load(order)
+	num_genes = len(gene_ordering)
+	gene_lengths = np.zeros(num_genes, dtype=int)
+	gene_features = [[] for i in range(num_genes)]
+	chunk_len = 50
+
+	for gene in finished_genes:
+		# Figure out where this gene is in the list of all genes
+		# Finished genes should be in the top N genes, but we read them from 
+		#   the dir in abc order so need to re-get the index		
+		i = int(list(gene_ordering).index(gene))
+
+		# Read in all chunks for the gene. May or may not be in order
+		try:
+			f = open(source_folder + gene + ".npy", "r")
+			chunks = np.load(f).values()
+		except:
+			print gene
+			continue
+		
+		sorted(chunks, key=itemgetter(1))
+		
+
+		# Make a new list because the first item stupidly isn't a list (bug courtesy of KD)
+		ordered_chunks = [chunks[0][:3]]
+		chunk_len = max(chunk_len, len(chunks[0][2]))
+		ordered_chunks.extend(chunks[0][3:])
+		ordered_chunks = sorted(ordered_chunks, key=itemgetter(0))
+
+		print "-----------", gene, "\t# chunks:\t", len(ordered_chunks), "\tindex:\t", i
+
+		# Sanity check to make sure no chunks are missing
+		chunk_numbers = [j[0] for j in ordered_chunks]
+		mod = chunk_numbers[0]
+		chunk_numbers = [j - mod for j in chunk_numbers]
+		print range(len(ordered_chunks))[-1], chunk_numbers[-1], np.floor(len(ordered_chunks)-1 / 2.)
+
+		##### TEMPORARY WORKAROUND
+		
+		if np.floor(len(ordered_chunks)-1 / 2.) != chunk_numbers[-1]:
+			print "removing"
+			f.close()
+			os.remove(source_folder + gene + ".npy")
+			continue
+		
+		assert range(len(ordered_chunks)) == chunk_numbers
+		
+		gene_lengths[i] = int(len(ordered_chunks))
+		gene_features[i] = ordered_chunks
+
+	# assert np.count_nonzero(gene_lengths) == len(finished_genes)
+	# for i in range(len(gene_features)-1,-1,-1):
+	# 	if gene_lengths[i] > 0:
+	# 		break
+
+	gene_lengths = gene_lengths[:i+1]
+	print len(gene_lengths)
+	gene_features = gene_features[:i+1]
+
+	num_chunks = int(np.sum(gene_lengths))
+	row_labels = [[] for j in range(num_chunks)]
+	mfe = np.zeros(num_chunks)
+	pair_probs = np.zeros((num_chunks, chunk_len))
+	to_write = [[] for j in range(num_chunks)]
+	index = 0
+	for i,length in enumerate(gene_lengths):
+		gene_name = gene_ordering[i]
+		for j in range(length):
+			# print gene_name + "_" + str(j)
+			# print i+j
+			chunk_number = gene_features[i][0]
+			row_labels[index] = [gene_name, gene_name + "_" + str(j), j]
+			mfe[index] = gene_features[i][j][1]
+			pair_probs[index,:] = gene_features[i][j][2]
+			index += 1
+			# print row_labels[i+j]
+			# print mfe[i+j]
+
+	print i+j
+	print index
+	print num_chunks
+	print len(row_labels)
 
 
-# def _read_mfold_hnum(hnumfile, seqlength):
-# 	hnum = np.zeros((seqlength, seqlength))
-# 	with open(hnumfile,"r") as f:
-# 		# There is probably a header
-# 		header = False #temp
-# 		for line in f:
-# 			if header == True:
-# 				continue
-# 			assert int(line[0])
-# 			i = int(line[2])
-# 			j = int(line[3])
-# 			h = float(line[4])
-# 			print i,j,h
-# 			hnum[i,j] = h
-# 			hnum[j,i] = h
-# 	return hnum
+	# np.save(data_home + out_folder + out_folder[:-1] + "_results/mfe.npy", mfe)
+	# np.save(data_home + out_folder + out_folder[:-1] + "_results/pair_probs.npy", pair_probs)
+	# np.save(data_home + out_folder + out_folder[:-1] + "_results/row_names.npy", row_labels)
+	np.save(out_folder + source_folder.split("/")[-2] + "_mfe.npy", mfe)
+	np.save(out_folder + source_folder.split("/")[-2] + "_pair_probs.npy", pair_probs)
+	np.save(out_folder + source_folder.split("/")[-2] + "_row_names.npy", row_labels)
 
-def main():
-	print "ok I'm running........"
-	seq = "GUCUACGGCCAUACCACCCUGAACGCGCCCGAUCUCGUCUGAUCUCGGAAGCUAAGCAGG\
-GUCGGGCCUGGUUAGUACUUGGAUGGGAGACCGCCUGGGAAUACCGGGUGCUGUAGGCUU"
-	i_seq = 1
-
-	# _call_rnafold(seq, i_seq)
-
-	base_to_rrna = "/Volumes/cycle/rrna/"
-	print "Creating feature extractor"
-	fe = FeatureExtractor()
-	print "Loading gene features"
-	fe.load_gene_features() # returns bool; returns true if precomputed
-	print "Generating chunked seqs"
-	fe.generate_chunked_sequences()
-	print "Finished generating chunked seqs"
-	# print fe.genefeatures
-
-	print "Predicting secondary structure for all chunked seqs"
-	results = predict_secondary_for_chunks_parallel(fe, "temp")
-	print "Done!!"
-	# generate chunked seqs
+	print "Saving to " + out_folder + source_folder.split("/")[-2] + "_*.npy"
 
 
 
 
+# def main():
+# 	print "ok I'm running........"
+# 	seq = "GUCUACGGCCAUACCACCCUGAACGCGCCCGAUCUCGUCUGAUCUCGGAAGCUAAGCAGG\
+# GUCGGGCCUGGUUAGUACUUGGAUGGGAGACCGCCUGGGAAUACCGGGUGCUGUAGGCUU"
+# 	i_seq = 1
+
+# 	# _call_rnafold(seq, i_seq)
+
+# 	base_to_rrna = "/Volumes/cycle/rrna/"
+# 	print "Creating feature extractor"
+# 	fe = FeatureExtractor()
+# 	print "Loading gene features"
+# 	fe.load_gene_features() # returns bool; returns true if precomputed
+# 	print "Generating chunked seqs"
+# 	fe.generate_chunked_sequences()
+# 	print "Finished generating chunked seqs"
+# 	# print fe.genefeatures
+
+# 	print "Predicting secondary structure for all chunked seqs"
+# 	results = predict_secondary_for_chunks_parallel(fe, "temp")
+# 	print "Done!!"
+# 	# generate chunked seqs
 
 
 
 
-if __name__ == '__main__':
-	main()
+# from featureExtraction import *
+# import generate_rnafold_features as rnafold
+# fe = FeatureExtractor()
+# fe.load_chunked_sequences()
+# results = rnafold.predict_secondary_for_chunks_parallel(fe, "rnafold_mean", n_processes=40)
+
+
+
+
+
+# if __name__ == '__main__':
+# 	main()
 

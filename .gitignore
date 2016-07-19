@@ -2,3 +2,4 @@
 .fuse_*
 *.pyc
 *.fa
+*.npy

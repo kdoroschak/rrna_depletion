@@ -1,6 +1,6 @@
 import gffutils # pip install gffutils
 from Bio import SeqIO # pip install Biopython
-import pysam # pip install pysam
+# import pysam # pip install pysam
 import cPickle as pkl
 from itertools import islice, takewhile, count
 import glob
@@ -14,6 +14,7 @@ import scipy.spatial
 import time
 
 home_path = os.path.expanduser("~")
+# home_path = "/Volumes/cycle"
 
 def check_chromosome(chrom):
     if chrom in ["chr%d" % (i+1) for i in range(22)]:
@@ -32,18 +33,20 @@ class FeatureExtractor(object):
     def __init__(self,
                  fasta_file_path=home_path+"/rrna/data/ref_genomes/GRCh38_o.p3.genome.fa",
                  gtf_file_path=home_path+"/rrna/data/annotations/Homo_sapiens.GRCh38.84.gtf",
-                 save_path=home_path+"/rrna/data/featureExtractors/Homo_sapiens.GRCh38.84_gene_features.pkl"):
+                 save_path=home_path+"/rrna/data/featureExtractors/Homo_sapiens.GRCh38.84_gene_features.pkl",
+                 chunk_save_path=home_path+"/rrna/data/featureExtractors/Homo_sapiens.GRCh38.84_gene_chunks.pkl"):
 
         self.fasta_file_path = fasta_file_path
+        self.chunk_save_path = chunk_save_path
         self.gtf_file_path = gtf_file_path
         self.gtf_db_path = self.gtf_file_path[:-4] + "features.db"
         self.genefeatures = {}
-        self.gf_save_path = save_path
+        self.gtf_save_path = save_path
 
     def load_gene_features(self):
-        if os.path.exists(self.gf_save_path):
+        if os.path.exists(self.gtf_save_path):
             try:
-                f = open(self.gf_save_path, "r")
+                f = open(self.gtf_save_path, "r")
                 self.genefeatures = pkl.load(f)
                 f.close()
             except:
@@ -61,7 +64,9 @@ class FeatureExtractor(object):
             gtf_db = gffutils.create_db(self.gtf_file_path,
                                         dbfn=self.gtf_db_path,
                                         disable_infer_transcripts=True,
-                                        disable_infer_genes=True)
+                                        disable_infer_genes=True,
+                                        keep_order=True)
+                                        # id_spec="gene_name")
 
         gtf_features = np.array(list(gtf_db.all_features()))
         gtf_types = np.array([f.featuretype for f in gtf_features])
@@ -92,6 +97,18 @@ class FeatureExtractor(object):
         pkl.dump(self.genefeatures, f)
         f.close()
 
+    def load_chunked_sequences(self):
+        if os.path.exists(self.chunk_save_path):
+            try:
+                f = open(self.chunk_save_path, "r")
+                self.genefeatures = pkl.load(f)
+                f.close()
+                return True
+            except:
+                return False
+        else:
+            return False
+
     def generate_chunked_sequences(self):
         fasta_seqs = {}
         fasta_parse = SeqIO.parse(open(self.fasta_file_path), 'fasta')
@@ -99,16 +116,15 @@ class FeatureExtractor(object):
             fasta_seqs[anno.name] = anno.seq
 
         for gf_key in self.genefeatures.keys():
-            print gf_key
             gf = self.genefeatures[gf_key]
             chrom, accepted = check_chromosome(gf.chrom)
             if accepted:
                 gf.generate_full_sequence(fasta_seqs[gf.chrom])
                 gf.partition_sequence_in_chunks(chunk_size=50)
 
-        # f = open(self.gf_save_path, "w")
-        # pkl.dump(self.genefeatures, f)
-        # f.close()
+        f = open(self.chunk_save_path, "w")
+        pkl.dump(self.genefeatures, f)
+        f.close()
 
     def generate_sequences(self):
         fasta_seqs = {}
@@ -120,15 +136,15 @@ class FeatureExtractor(object):
             gf = self.genefeatures[gf_key]
             gf.generate_full_sequence(fasta_seqs[gf.chrom])
 
-    def calculate_gene_coverage(self, bam_path):
-        pfile = pysam.AlignmentFile(bam_path, "rb")
+    # def calculate_gene_coverage(self, bam_path):
+    #     pfile = pysam.AlignmentFile(bam_path, "rb")
 
-        coverage_dict = {}
-        for gf_key in self.genefeatures.keys():
-            gf = self.genefeatures[gf_key]
-            coverage_dict[gf_key] = gf.calculate_chunkwise_coverage(pfile)
+    #     coverage_dict = {}
+    #     for gf_key in self.genefeatures.keys():
+    #         gf = self.genefeatures[gf_key]
+    #         coverage_dict[gf_key] = gf.calculate_chunkwise_coverage(pfile)
 
-        return coverage_dict
+    #     return coverage_dict
 
 
 class GeneFeatures(object):
