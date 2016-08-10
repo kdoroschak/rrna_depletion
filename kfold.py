@@ -1,12 +1,13 @@
 import numpy as np
-from sklearn import neighbors # using KNeighborsRegressor, KNeighborsClassifier
+from sklearn import neighbors, svm # using KNeighborsRegressor, KNeighborsClassifier
 from sklearn.metrics import mean_squared_error, confusion_matrix
 from datetime import datetime
 
-def kfold(rrna_data, non_rrna_data, save_folder="./", n_partitions=10, sampling="over", load_crossval_partitions=False, filter_zero_rows=False):
-	results_log_file = save_folder + "/knn_results_" + datetime.now().strftime("%y-%m-%d_%H:%M") + ".txt"
+def kfold(rrna_data, non_rrna_data, save_folder="./", n_partitions=10, sampling="over", load_crossval_partitions=False, filter_zero_rows=False, method="knn"):
+	results_log_file = save_folder + "/knn_results_" + method + "_" + datetime.now().strftime("%y-%m-%d_%H:%M") + ".txt"
 	results_log = open(results_log_file, "w")
 	print >>results_log, "Parameters for this run:"
+	print >>results_log, "Method used:", method
 	print >>results_log, "Number of partitions: ", str(n_partitions)
 	print >>results_log, "Sampling style: ", sampling
 	print >>results_log, "Filtering zero rows? ", str(filter_zero_rows)
@@ -66,10 +67,10 @@ def kfold(rrna_data, non_rrna_data, save_folder="./", n_partitions=10, sampling=
 	# Partition the now-balanced datasets into test/train for cross-validation
 	# As each class is partitioned, save it and run the classifier
 	for k in range(n_partitions):
-		save_train_x = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + sampling + "sampled_test_data.npy"
-		save_train_y = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + sampling + "sampled_test_labels.npy"
-		save_test_x = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + sampling + "sampled_train_data.npy"
-		save_test_y = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + sampling + "sampled_train_labels.npy"
+		save_train_x = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_test_data.npy"
+		save_train_y = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_test_labels.npy"
+		save_test_x  = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_train_data.npy"
+		save_test_y  = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_train_labels.npy"
 		# print save_train_x
 		# print save_train_y
 		# print save_test_x
@@ -90,15 +91,11 @@ def kfold(rrna_data, non_rrna_data, save_folder="./", n_partitions=10, sampling=
 			train_x, train_y, test_x, test_y = get_cross_validation_set(k, n_partitions, rrna_data, non_rrna_data)
 
 		print "Training the model for partition", k
-		knc = neighbors.KNeighborsClassifier(n_neighbors=1, weights="distance", n_jobs=50, algorithm="ball_tree")
-		knc.fit(train_x, train_y)
-		print "Predicting the labels for the training set of partition", k
-		y_hat_train = knc.predict(train_x)
-		y_hat_train_file = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + sampling + "predicted_train_labels.npy"
+		y_hat_train, y_hat_test = train_and_predict(train_x, train_y, test_x, test_y, method=method)
+
+		y_hat_train_file = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "predicted_train_labels.npy"
+		y_hat_test_file = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "predicted_test_labels.npy"
 		np.save(y_hat_train_file, y_hat_train)
-		print "Predicting the labels for the test set of partition", k
-		y_hat_test = knc.predict(test_x)
-		y_hat_test_file = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + sampling + "predicted_test_labels.npy"
 		np.save(y_hat_test_file, y_hat_test)
 
 		print "Analyzing the prediction performance for partition", k
@@ -117,7 +114,7 @@ def kfold(rrna_data, non_rrna_data, save_folder="./", n_partitions=10, sampling=
 		print >>results_log, "# ----------------------------------"
 		print >>results_log, "Training set: " + str(train_y.shape[0]) + " samples"
 		print >>results_log, "Testing set:  " + str(test_y.shape[0]) + " samples"
-		print >>results_log, "Sets saved at: " +  save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + sampling + "sampled_{test, train}_{data, labels}.npy"
+		print >>results_log, "Sets saved at: " +  save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_{test, train}_{data, labels}.npy"
 		print >>results_log, ""
 		print >>results_log, "Training set predictions:"
 		print >>results_log, "RMSE: ", rmse_train
@@ -143,6 +140,26 @@ def kfold(rrna_data, non_rrna_data, save_folder="./", n_partitions=10, sampling=
 		# print "  confusion matrix:\n", confusion
 		# print ""
 	results_log.close()
+
+def train_and_predict(train_x, train_y, test_x, test_y, method="knn"):
+	if method == "knn":
+		knc = neighbors.KNeighborsClassifier(n_neighbors=1, weights="distance", n_jobs=50, algorithm="ball_tree")
+		knc.fit(train_x, train_y)
+		print "Predicting the labels for the training set"
+		y_hat_train = knc.predict(train_x)
+		print "Predicting the labels for the test set"
+		y_hat_test = knc.predict(test_x)
+
+	elif method == "svm":
+		clf = svm.SVC(kernel="rbf")
+		clf.fit(train_x, train_y)  
+		print "Predicting the labels for the training set"
+		y_hat_train = clf.predict(train_x)
+		print "Predicting the labels for the test set"
+		y_hat_test = clf.predict(test_x)
+
+	return y_hat_train, y_hat_test
+
 
 def calc_rmse(actual, predicted):
 	rmse = np.sqrt(mean_squared_error(actual, predicted))
