@@ -13,7 +13,8 @@ import re
 import scipy.spatial
 import time
 
-home_path = os.path.expanduser("~")
+# home_path = os.path.expanduser("~")
+home_path = "/projects/bio/"
 # home_path = "/Volumes/cycle"
 
 def check_chromosome(chrom):
@@ -67,7 +68,6 @@ class FeatureExtractor(object):
                                         disable_infer_genes=True,
                                         keep_order=True)
                                         # id_spec="gene_name")
-
         gtf_features = np.array(list(gtf_db.all_features()))
         gtf_types = np.array([f.featuretype for f in gtf_features])
         # gtf_genes = gtf_features[gtf_types == "gene"]
@@ -75,8 +75,10 @@ class FeatureExtractor(object):
         # gtf_features = None
         # gtf_types = None
 
+        count_non_accepted = 0
         for gtf_exon in gtf_exons:
             chrom, accepted = check_chromosome(gtf_exon.chrom)
+
 
             if accepted:
                 if "gene_name" in gtf_exon.attributes.keys():
@@ -92,8 +94,12 @@ class FeatureExtractor(object):
                     self.genefeatures[gene_name] = gf
                     self.genefeatures[gene_name].exons.append([gtf_exon.start,
                                                                gtf_exon.end])
+            else: 
+                count_non_accepted += 1
 
-        f = open(self.gf_save_path, "w")
+        if count_non_accepted > 0:
+            print "Warning: " + str(count_non_accepted) +  " exons were not accepted from the whole gtf file"
+        f = open(self.gtf_save_path, "w")
         pkl.dump(self.genefeatures, f)
         f.close()
 
@@ -109,18 +115,20 @@ class FeatureExtractor(object):
         else:
             return False
 
-    def generate_chunked_sequences(self):
+    def generate_chunked_sequences(self, chunk_size=50, chunk_distance=25):
         fasta_seqs = {}
         fasta_parse = SeqIO.parse(open(self.fasta_file_path), 'fasta')
         for anno in fasta_parse:
-            fasta_seqs[anno.name] = anno.seq
+            chrom, accepted = check_chromosome(anno.name)
+            fasta_seqs[chrom] = anno.seq
+            # fasta_seqs[anno.name] = anno.seq
 
         for gf_key in self.genefeatures.keys():
             gf = self.genefeatures[gf_key]
             chrom, accepted = check_chromosome(gf.chrom)
             if accepted:
-                gf.generate_full_sequence(fasta_seqs[gf.chrom])
-                gf.partition_sequence_in_chunks(chunk_size=50)
+                gf.generate_full_sequence(fasta_seqs[chrom])
+                gf.partition_sequence_in_chunks(chunk_size, chunk_distance)
 
         f = open(self.chunk_save_path, "w")
         pkl.dump(self.genefeatures, f)
@@ -176,7 +184,7 @@ class GeneFeatures(object):
         for exon in self.exons:
             self.sequence += fasta_seq[exon[0]: exon[1]].tostring()
 
-    def partition_sequence_in_chunks(self, chunk_size=50):
+    def partition_sequence_in_chunks(self, chunk_size=50, chunk_distance=25):
         assert chunk_size > 0
         assert chunk_size % 2 == 0
 
@@ -187,14 +195,16 @@ class GeneFeatures(object):
             pos = 0
             while pos < len(self.sequence):
                 if len(self.sequence)-pos < chunk_size:
-                    self.chunks.append(self.sequence[-chunk_size:])
-                    self.chunk_locs.append([len(self.sequence) - chunk_size,
-                                            len(self.sequence)])
+                    # Note: removed this because it seems to add the last sequence twice
+                    # self.chunks.append(self.sequence[-chunk_size:])
+                    # self.chunk_locs.append([len(self.sequence) - chunk_size,
+                    #                         len(self.sequence)])
                     pos = len(self.sequence)
+                
                 else:
                     self.chunks.append(self.sequence[pos: pos+chunk_size])
                     self.chunk_locs.append([pos, pos+chunk_size])
-                    pos += chunk_size/2
+                    pos += chunk_distance
 
     def calculate_mean_coverage(self, pfile):
         pileupcolumns = pfile.pileup(self.chrom, self.start, self.end)
