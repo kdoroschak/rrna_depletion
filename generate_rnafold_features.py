@@ -11,10 +11,11 @@ import signal
 if sys.platform == "darwin":
   base = "/Volumes/cycle/"
 else:
-  base = "/homes/gws/" + os.getlogin() + "/" # make portable for katies and svens
+  # base = "/homes/gws/" + os.getlogin() + "/" # make portable for katies and svens
+  base = "/projects/bio/rrna"
 
-source_home = base + "rrna/src/"
-data_home = base + "rrna/data/"
+source_home = base + "/src/"
+data_home = base + "/data/"
 # rnafold_home = base + "software/ViennaRNA/"
 
 # TODO make everything save to a temporary folder instead of just the rundir
@@ -53,32 +54,29 @@ def predict_secondary_for_chunks(feature_extractor, out_folder, T=68):
 
 def predict_secondary_for_chunks_parallel(fe,
 										  out_folder, 
-										  gene_list=None,
+										  gene_list="/projects/bio/rrna/data/featureExtractors/Homo_sapiens.GRCh38.84_ordered_gene_names.npy",
 										  n_processes=1,
 										  T=68):
 	
 	# Homo_sapiens.GRCh38.84_gene_names_ribo.npy
-	# genefeatures = np.load("/Volumes/cycle/rrna/data/featureExtractors/Homo_sapiens.GRCh38.84_ordered_gene_names.npy")
-	if gene_list is None:
-		genefeatures = np.load(data_home + "featureExtractors/Homo_sapiens.GRCh38.84_ordered_gene_names.npy")
-	else:
-		genefeatures = np.load(gene_list)
+	genefeatures = np.load(gene_list)
+	# print genefeatures
+	if not os.path.exists(data_home + "/" + out_folder + "/raw"):
+		os.makedirs(data_home + "/" + out_folder + "/raw")
 
-	finished_genes = os.listdir(data_home + out_folder)
+	
+
+	finished_genes = os.listdir(data_home + "/" + out_folder)
 	finished_genes = [os.path.splitext(i)[0] for i in finished_genes]
-	# f = open(outfile_base+".npy", "w")
-	# manager = Manager()
-	# q = manager.Queue()   
-	print len(finished_genes)
 
 	multi_params = []
 	features = {}
 	genes_not_in_db = []
 	for feature in genefeatures:
 		gene_name = feature
+		# print gene_name
 		if gene_name in finished_genes:
 			continue
-
 		try:
 			fe.genefeatures[feature]
 		except:
@@ -132,7 +130,8 @@ def _call_rnafold(args): #T=68 is for ribozero # seq, seqid, T=68
 	os.remove(fname + ".fa")
 	seqlength = len(seq)
 	pair_probs = _read_rnafold_dotplot(fname + "_dp.ps", seqlength)
-	contact_probs = _summarize_dotplot(pair_probs)
+	contact_probs_mean = _summarize_dotplot(pair_probs, "mean")
+	contact_probs_norm = _summarize_dotplot(pair_probs, "norm")
 	mfe = _read_rnafold_mfe(fname + "_" + fname + ".fold")
 	os.remove(fname + "_dp.ps")
 	os.remove(fname + "_ss.ps")
@@ -145,22 +144,41 @@ def _call_rnafold(args): #T=68 is for ribozero # seq, seqid, T=68
 		f = open(data_home + out_folder + "/" + gene_name + ".npy", "r")
 		features = np.load(f)
 		f.close()
-		features[gene_name].append([seqid, mfe, contact_probs])
+		features[gene_name].append([seqid, mfe, contact_probs_mean, contact_probs_norm])
 		f = open(data_home + out_folder + "/" + gene_name + ".npy", "w")
 		pkl.dump(features, f)
 		f.close()
 	else:
 		f = open(data_home + out_folder + "/" + gene_name + ".npy", "w")
 		features = {}
-		features[gene_name] = [seqid, mfe, contact_probs]
+		features[gene_name] = [seqid, mfe, contact_probs_mean, contact_probs_norm]
 		pkl.dump(features, f)
 		f.close()
-	matrix_file = open(data_home + out_folder + "/matrices/" + gene_name + "_" + str(seqid) + "_matrix.npy", "w")
-	pkl.dump(pair_probs, matrix_file)
-	matrix_file.close()
-	
+
+	raw_data_file = data_home + out_folder + "/raw/" + gene_name + "_rawprobs_matrix.npy"
+	raw_data_file_exists = os.path.isfile(raw_data_file)
+	f = ""
+	if raw_data_file_exists:
+		f = open(raw_data_file, "r")
+		matrices = np.load(f)
+		f.close()
+		matrices[seqid] = pair_probs
+		f = open(raw_data_file, "w")
+		pkl.dump(matrices, f)
+		f.close()
+	else:
+		f = open(raw_data_file, "w")
+		matrices = {}
+		matrices[seqid] = pair_probs
+		pkl.dump(matrices, f)
+		f.close()
 	print fname + " finished"
-	return gene_name, seqid, mfe, contact_probs
+	# matrix_file = open(data_home + out_folder + "/matrices/" + gene_name + "_" + str(seqid) + "_matrix.npy", "w")
+	# pkl.dump(pair_probs, matrix_file)
+	# matrix_file.close()
+	
+	
+	return gene_name, seqid, mfe, contact_probs_mean, contact_probs_norm
 
 def _read_rnafold_mfe(foldfile):
 	with open(foldfile,"r") as f:
@@ -197,55 +215,56 @@ def _read_rnafold_dotplot(plotfile, seqlength):
 				pair_probs[j,i] = p
 	return pair_probs
 
-def _summarize_dotplot(dotplot):
+def _summarize_dotplot(dotplot, method):
 	# Return the (col) vector of probs that each base i touches anything else
-	marg = np.mean(dotplot, axis=1)
+	if method == "norm":
+		marg = np.linalg.norm(dotplot, axis=1)
+	elif method == "mean":
+		marg = np.mean(dotplot, axis=1)
 	return marg
 
-def create_feature_vector(source_folder, out_folder, order):
+def create_feature_vector(source_folder, out_folder, output_base_name=None, order=None):
 	# source_folder = "/Volumes/cycle/rrna/data/rnafold/"
 	# out_folder = "rnafold"
 	# order = "/Volumes/cycle/rrna/data/featureExtractors/Homo_sapiens.GRCh38.84_ordered_gene_names.npy"
 
-	if sys.platform == "darwin":
-	  base = "/Volumes/cycle/rrna/"
-	else:
-	  base = "/homes/gws/kdorosch/rrna/"
+	finished_genes = [os.path.splitext(i)[0] for i in os.listdir(source_folder) if os.path.isfile(source_folder + "/" + i) and not i.startswith(".")]
 
-	finished_genes = [os.path.splitext(i)[0] for i in os.listdir(source_folder) if os.path.isfile(source_folder + i) and not i.startswith(".")]
+	if order is not None:
+		gene_ordering = np.load(order)
+		sorted_genes = []
+		for gene in gene_ordering:
+			if gene in finished_genes:
+				sorted_genes.append(gene)
+		finished_genes = sorted_genes
 
-	# genes_to_select = np.load(base+"data/featureExtractors/Homo_sapiens.GRCh38.84_gene_names_ribo.npy")
-	# print genes_to_select
-	# print finished_genes
-	# finished_genes = set(finished_genes).intersection(set(genes_to_select))
-	# print finished_genes
-	
-	gene_ordering = np.load(order)
-	num_genes = len(gene_ordering)
+	if output_base_name is None:
+		output_base_name = source_folder.rstrip("/").split("/")[-1]
+
+	num_genes = len(finished_genes)
 	gene_lengths = np.zeros(num_genes, dtype=int)
 	gene_features = [[] for i in range(num_genes)]
-	chunk_len = 50
+	detected_chunk_len = None
 
-	for gene in finished_genes:
-		# Figure out where this gene is in the list of all genes
-		# Finished genes should be in the top N genes, but we read them from 
-		#   the dir in abc order so need to re-get the index		
-		i = int(list(gene_ordering).index(gene))
+	error_file_name = "/".join(source_folder.rstrip("/").split("/")[:-1]) + "/create_feature_vector_errors.log"
+	print error_file_name
+	error_file = open(error_file_name, "w")
 
+	for i, gene in enumerate(finished_genes):
 		# Read in all chunks for the gene. May or may not be in order
 		try:
-			f = open(source_folder + gene + ".npy", "r")
+			f = open(source_folder + "/" + gene + ".npy", "r")
 			chunks = np.load(f).values()
 		except:
-			print gene
+			print "Error: Could not load chunks for " + gene
+			error_file.write("Error: Could not load chunks for " + gene + "\n")
 			continue
 		
-		sorted(chunks, key=itemgetter(1))
-		
+		sorted(chunks, key=itemgetter(1)) # Sort by chunk number
 
 		# Make a new list because the first item stupidly isn't a list (bug courtesy of KD)
 		ordered_chunks = [chunks[0][:3]]
-		chunk_len = max(chunk_len, len(chunks[0][2]))
+		detected_chunk_len = max(detected_chunk_len, len(chunks[0][2]))
 		ordered_chunks.extend(chunks[0][3:])
 		ordered_chunks = sorted(ordered_chunks, key=itemgetter(0))
 
@@ -255,14 +274,15 @@ def create_feature_vector(source_folder, out_folder, order):
 		chunk_numbers = [j[0] for j in ordered_chunks]
 		mod = chunk_numbers[0]
 		chunk_numbers = [j - mod for j in chunk_numbers]
-		print range(len(ordered_chunks))[-1], chunk_numbers[-1], np.floor(len(ordered_chunks)-1 / 2.)
+		# print range(len(ordered_chunks))[-1], chunk_numbers[-1], np.floor(len(ordered_chunks)-1 / 2.)
 
 		##### TEMPORARY WORKAROUND
 		
 		if np.floor(len(ordered_chunks)-1 / 2.) != chunk_numbers[-1]:
 			print "removing"
+			error_file.write("Gene " + gene + " is missing chunks.\n")
 			f.close()
-			os.remove(source_folder + gene + ".npy")
+			# os.remove(source_folder + gene + ".npy")
 			continue
 		
 		assert range(len(ordered_chunks)) == chunk_numbers
@@ -282,36 +302,39 @@ def create_feature_vector(source_folder, out_folder, order):
 	num_chunks = int(np.sum(gene_lengths))
 	row_labels = [[] for j in range(num_chunks)]
 	mfe = np.zeros(num_chunks)
-	pair_probs = np.zeros((num_chunks, chunk_len))
+	pair_probs = np.zeros((num_chunks, detected_chunk_len))
 	to_write = [[] for j in range(num_chunks)]
 	index = 0
 	for i,length in enumerate(gene_lengths):
-		gene_name = gene_ordering[i]
+		gene_name = finished_genes[i]
 		for j in range(length):
 			# print gene_name + "_" + str(j)
 			# print i+j
 			chunk_number = gene_features[i][0]
 			row_labels[index] = [gene_name, gene_name + "_" + str(j), j]
 			mfe[index] = gene_features[i][j][1]
-			pair_probs[index,:] = gene_features[i][j][2]
+			mean_pair_probs[index,:] = gene_features[i][j][2]
+			norm_pair_probs[index,:] = gene_features[i][j][3]
 			index += 1
 			# print row_labels[i+j]
 			# print mfe[i+j]
 
-	print i+j
+	# print i+j
 	print index
 	print num_chunks
 	print len(row_labels)
 
 
-	# np.save(data_home + out_folder + out_folder[:-1] + "_results/mfe.npy", mfe)
-	# np.save(data_home + out_folder + out_folder[:-1] + "_results/pair_probs.npy", pair_probs)
-	# np.save(data_home + out_folder + out_folder[:-1] + "_results/row_names.npy", row_labels)
-	np.save(out_folder + source_folder.split("/")[-2] + "_mfe.npy", mfe)
-	np.save(out_folder + source_folder.split("/")[-2] + "_pair_probs.npy", pair_probs)
-	np.save(out_folder + source_folder.split("/")[-2] + "_row_names.npy", row_labels)
+	# np.save(out_folder + "/" + output_base_name + "_results/mfe.npy", mfe)
+	# np.save(out_folder + "/" + output_base_name + "_results/pair_probs.npy", pair_probs)
+	# np.save(out_folder + "/" + output_base_name + "_results/row_names.npy", row_labels)
+	print source_folder.split("/")
+	np.save(out_folder + "/" + output_base_name + "_mfe.npy", mfe)
+	np.save(out_folder + "/" + output_base_name + "_pair_probs_mean.npy", mean_pair_probs)
+	np.save(out_folder + "/" + output_base_name + "_pair_probs_norm.npy", norm_pair_probs)
+	np.save(out_folder + "/" + output_base_name + "_row_names.npy", row_labels)
 
-	print "Saving to " + out_folder + source_folder.split("/")[-2] + "_*.npy"
+	print "Saving to " + out_folder + "/" + output_base_name + "_*.npy"
 
 
 
