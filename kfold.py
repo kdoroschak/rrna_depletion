@@ -4,7 +4,8 @@ from sklearn.metrics import mean_squared_error, confusion_matrix
 from datetime import datetime
 
 def kfold(rrna_data, non_rrna_data, save_folder="./", n_partitions=10, sampling="over", load_crossval_partitions=False, filter_zero_rows=False, method="knn"):
-	results_log_file = save_folder + "/knn_results_" + method + "_" + datetime.now().strftime("%y-%m-%d_%H:%M") + ".txt"
+	logtime = datetime.now().strftime("%y-%m-%d_%H:%M")
+	results_log_file = save_folder + "/knn_results_" + method + "_" + logtime + ".txt"
 	results_log = open(results_log_file, "w")
 	print >>results_log, "Parameters for this run:"
 	print >>results_log, "Method used:", method
@@ -67,10 +68,10 @@ def kfold(rrna_data, non_rrna_data, save_folder="./", n_partitions=10, sampling=
 	# Partition the now-balanced datasets into test/train for cross-validation
 	# As each class is partitioned, save it and run the classifier
 	for k in range(n_partitions):
-		save_train_x = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_test_data.npy"
-		save_train_y = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_test_labels.npy"
-		save_test_x  = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_train_data.npy"
-		save_test_y  = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_train_labels.npy"
+		save_train_x = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_" + logtime + "_test_data.npy"
+		save_train_y = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_" + logtime + "_test_labels.npy"
+		save_test_x  = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_" + logtime + "_train_data.npy"
+		save_test_y  = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_" + logtime + "_train_labels.npy"
 		# print save_train_x
 		# print save_train_y
 		# print save_test_x
@@ -91,30 +92,30 @@ def kfold(rrna_data, non_rrna_data, save_folder="./", n_partitions=10, sampling=
 			train_x, train_y, test_x, test_y = get_cross_validation_set(k, n_partitions, rrna_data, non_rrna_data)
 
 		print "Training the model for partition", k
-		y_hat_train, y_hat_test = train_and_predict(train_x, train_y, test_x, test_y, method=method)
+		clf, y_hat_train, y_hat_test = train_and_predict(train_x, train_y, test_x, test_y, method=method)
 
-		y_hat_train_file = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "predicted_train_labels.npy"
-		y_hat_test_file = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "predicted_test_labels.npy"
+		y_hat_train_file = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_" + logtime + "_train_labels.npy"
+		y_hat_test_file = save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_" + logtime + "_test_labels.npy"
 		np.save(y_hat_train_file, y_hat_train)
 		np.save(y_hat_test_file, y_hat_test)
 
 		print "Analyzing the prediction performance for partition", k
 		rmse_train = calc_rmse(train_y, y_hat_train)
-		acc_train = knc.score(train_x, train_y)
+		acc_train = clf.score(train_x, train_y)
 		nz_predicted_train = np.count_nonzero(y_hat_train)
 		nz_actual_train = np.count_nonzero(train_y)
 		confusion_train = confusion_matrix(train_y, y_hat_train)
 		rmse_test = calc_rmse(test_y, y_hat_test)
-		acc_test = knc.score(test_x, test_y)
+		acc_test = clf.score(test_x, test_y)
 		nz_predicted_test = np.count_nonzero(y_hat_test)
 		nz_actual_test = np.count_nonzero(test_y)
 		confusion_test = confusion_matrix(test_y, y_hat_test)
-		print >>results_log, "# ----------------------------------"
-		print >>results_log, "### Results for k-fold partition " + str(k).zfill(2) + ":"
-		print >>results_log, "# ----------------------------------"
+		print >>results_log, "# --------------------------------- #"
+		print >>results_log, "#  Results for k-fold partition " + str(k).zfill(2) + ": #"
+		print >>results_log, "# --------------------------------- #"
 		print >>results_log, "Training set: " + str(train_y.shape[0]) + " samples"
 		print >>results_log, "Testing set:  " + str(test_y.shape[0]) + " samples"
-		print >>results_log, "Sets saved at: " +  save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_{test, train}_{data, labels}.npy"
+		print >>results_log, "Sets saved at: " +  save_folder.rstrip("/") + "/knn_kfold-" + str(k).zfill(2) + "of" + str(n_partitions).zfill(2) + "_" + method + "_" + sampling + "sampled_" + logtime + "_{test, train}_{data, labels}.npy"
 		print >>results_log, ""
 		print >>results_log, "Training set predictions:"
 		print >>results_log, "RMSE: ", rmse_train
@@ -158,7 +159,7 @@ def train_and_predict(train_x, train_y, test_x, test_y, method="knn"):
 		print "Predicting the labels for the test set"
 		y_hat_test = clf.predict(test_x)
 
-	return y_hat_train, y_hat_test
+	return clf, y_hat_train, y_hat_test
 
 
 def calc_rmse(actual, predicted):
